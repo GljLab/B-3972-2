@@ -19,5 +19,6 @@ public class WorkshopRecord {
     private String productName;
     private BigDecimal declaredQuantity;
     private LocalDate recordDate;
+    private Long supplierId;
     private LocalDateTime createTime;
 }

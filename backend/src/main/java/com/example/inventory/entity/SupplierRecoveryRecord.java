@@ -5,19 +5,16 @@ import com.mybatisflex.annotation.KeyType;
 import com.mybatisflex.annotation.Table;
 import lombok.Data;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
-@Table("raw_material_record")
-public class RawMaterialRecord {
+@Table("supplier_recovery_record")
+public class SupplierRecoveryRecord {
     @Id(keyType = KeyType.Auto)
     private Long id;
-    private String materialId;
-    private String productName;
-    private BigDecimal theoreticalYield;
-    private LocalDate recordDate;
     private Long supplierId;
+    private String recoveryReason;
+    private String certificationMaterial;
+    private String approverName;
     private LocalDateTime createTime;
 }

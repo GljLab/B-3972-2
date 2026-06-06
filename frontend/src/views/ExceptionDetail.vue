@@ -62,6 +62,77 @@
       </div>
 
       <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+        <h3 class="text-base font-semibold text-gray-700 mb-4 border-b pb-2">责任归属</h3>
+        <div v-if="order.responsibleSupplierId" class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600">
+                已关联责任供应商：
+                <span class="font-medium text-blue-700">{{ responsibleSupplierName }}</span>
+              </p>
+              <p class="text-sm text-gray-500 mt-1">
+                责任说明：{{ order.responsibilityDescription || '无' }}
+              </p>
+              <p class="text-sm text-red-500 mt-1" v-if="order.deductScore">
+                已扣除信用分：-{{ order.deductScore }}分
+              </p>
+            </div>
+          </div>
+        </div>
+        <div v-else class="space-y-4">
+          <div>
+            <div class="flex items-center gap-2 mb-1">
+              <label class="text-sm text-gray-500">责任供应商</label>
+              <el-tag v-if="recommendedSupplier" type="success" size="small">系统推荐（基于业务记录）</el-tag>
+            </div>
+            <el-select
+              v-model="responsibilityForm.supplierId"
+              placeholder="请选择责任供应商（可选）"
+              clearable
+              filterable
+              class="!w-full"
+            >
+              <el-option
+                v-for="s in allSuppliers"
+                :key="s.id"
+                :label="`${s.supplierName} (${s.supplierCode})`"
+                :value="s.id"
+              />
+            </el-select>
+          </div>
+          <div>
+            <label class="text-sm text-gray-500 mb-1 block">责任说明
+              <span v-if="responsibilityForm.supplierId" class="text-red-500">*</span>
+            </label>
+            <el-input
+              v-model="responsibilityForm.responsibilityDescription"
+              type="textarea"
+              :rows="2"
+              placeholder="请填写具体的责任原因，如：原材料纯度不达标导致实际产量低于理论值"
+              maxlength="500"
+              show-word-limit
+            />
+          </div>
+          <div>
+            <label class="text-sm text-gray-500 mb-2 block">扣分档位
+              <span v-if="responsibilityForm.supplierId" class="text-red-500">*</span>
+            </label>
+            <el-radio-group v-model="responsibilityForm.deductLevel">
+              <el-radio value="3">轻微异常（扣3分）<span class="text-xs text-gray-500 ml-1">误差率5%-10%</span></el-radio>
+              <el-radio value="8">中度异常（扣8分）<span class="text-xs text-gray-500 ml-1">误差率10%-20%</span></el-radio>
+              <el-radio value="15">严重异常（扣15分）<span class="text-xs text-gray-500 ml-1">误差率20%以上</span></el-radio>
+            </el-radio-group>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <el-button type="primary" @click="handleConfirmResponsibility" :loading="submittingResponsibility">
+              确认关联
+            </el-button>
+            <el-button @click="handleSkipResponsibility">暂不关联</el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
         <h3 class="text-base font-semibold text-gray-700 mb-4 border-b pb-2">异常分类</h3>
         <el-select v-model="form.exceptionType" placeholder="请选择异常分类" class="!w-72">
           <el-option label="原材料损耗超标" value="原材料损耗超标" />
@@ -146,10 +217,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useExceptionStore } from '../store/exceptionStore'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormRules } from 'element-plus'
+import { supplierApi, type Supplier } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -173,6 +245,17 @@ const form = ref<Record<string, string>>({
 })
 
 const order = ref<any>(null)
+
+const allSuppliers = ref<any[]>([])
+const recommendedSupplier = ref<any>(null)
+const submittingResponsibility = ref(false)
+const responsibilityForm = ref({
+  supplierId: null as number | null,
+  responsibilityDescription: '',
+  deductLevel: 3
+})
+
+const responsibleSupplierName = ref('')
 
 const statusTagType = (status: string) => {
   if (status === '待处理') return 'danger'
@@ -203,6 +286,86 @@ const syncFormFromOrder = () => {
     verificationResult: o.verificationResult || '',
     status: o.status || '待处理'
   }
+  
+  if (o.responsibleSupplierId) {
+    const supplier = allSuppliers.value.find(s => s.id === o.responsibleSupplierId)
+    if (supplier) {
+      responsibleSupplierName.value = `${supplier.supplierName} (${supplier.supplierCode})`
+    }
+  }
+}
+
+const fetchAllSuppliers = async () => {
+  try {
+    const res: any = await supplierApi.list({ pageSize: 1000 })
+    allSuppliers.value = res.data.list || []
+  } catch (e) {}
+}
+
+const fetchRecommendedSupplier = async () => {
+  try {
+    const res: any = await supplierApi.recommendForException(Number(route.params.id))
+    if (res.data.recommendedSupplierId) {
+      recommendedSupplier.value = res.data.supplier
+      responsibilityForm.value.supplierId = res.data.recommendedSupplierId
+    }
+  } catch (e) {}
+}
+
+const handleConfirmResponsibility = async () => {
+  if (!responsibilityForm.value.supplierId) {
+    ElMessage.warning('请选择责任供应商')
+    return
+  }
+  if (!responsibilityForm.value.responsibilityDescription.trim()) {
+    ElMessage.warning('请填写责任说明')
+    return
+  }
+  
+  submittingResponsibility.value = true
+  try {
+    const deductScore = Number(responsibilityForm.value.deductLevel)
+    const operatorName = localStorage.getItem('userName') || '管理员'
+    
+    const res: any = await supplierApi.deductScore(
+      responsibilityForm.value.supplierId,
+      {
+        exceptionOrderId: Number(route.params.id),
+        deductScore,
+        responsibilityDescription: responsibilityForm.value.responsibilityDescription,
+        operatorName
+      }
+    )
+    
+    if (res.code === 200) {
+      const { newScore, becameBlacklist } = res.data
+      let msg = `已关联责任供应商并扣除${deductScore}分，当前供应商信用分为${newScore}分`
+      if (becameBlacklist) {
+        msg += '，该供应商已被自动列入黑名单'
+      }
+      ElMessage.success(msg)
+      
+      await store.fetchOrderById(Number(route.params.id))
+      syncFormFromOrder()
+    }
+  } catch (e) {
+  } finally {
+    submittingResponsibility.value = false
+  }
+}
+
+const handleSkipResponsibility = async () => {
+  try {
+    await ElMessageBox({
+      title: '确认跳过',
+      message: '确定暂不关联责任供应商吗？后续仍可在工单处理中补充关联。',
+      showCancelButton: true,
+      confirmButtonText: '确认跳过',
+      cancelButtonText: '返回编辑',
+      type: 'info'
+    })
+    ElMessage.info('已跳过责任归属环节')
+  } catch (e) {}
 }
 
 const handleSave = async () => {
@@ -228,7 +391,9 @@ watch(() => store.currentOrder, () => {
 })
 
 onMounted(async () => {
+  await fetchAllSuppliers()
   await store.fetchOrderById(Number(route.params.id))
   syncFormFromOrder()
+  await fetchRecommendedSupplier()
 })
 </script>

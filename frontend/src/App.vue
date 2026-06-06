@@ -11,6 +11,8 @@
             <router-link to="/dashboard" class="px-3 py-2 rounded-md transition hover:bg-indigo-500 font-medium" active-class="bg-indigo-700">业务校验大盘</router-link>
             <router-link to="/entry" class="px-3 py-2 rounded-md transition hover:bg-indigo-500 font-medium" active-class="bg-indigo-700">数据录入模块</router-link>
             <router-link to="/exception" class="px-3 py-2 rounded-md transition hover:bg-indigo-500 font-medium" active-class="bg-indigo-700">异常管理</router-link>
+            <router-link to="/suppliers" class="px-3 py-2 rounded-md transition hover:bg-indigo-500 font-medium" active-class="bg-indigo-700">供应商管理</router-link>
+            <router-link to="/supplier-dashboard" class="px-3 py-2 rounded-md transition hover:bg-indigo-500 font-medium" active-class="bg-indigo-700">供应商绩效</router-link>
           </nav>
         </div>
       </div>

@@ -37,6 +37,23 @@
                <el-input v-model="rawForm.productName" placeholder="如：产品A" />
              </el-form-item>
           </div>
+          <el-form-item label="供应商">
+            <el-select
+              v-model="rawForm.supplierId"
+              placeholder="请选择原材料供应商"
+              clearable
+              filterable
+              class="!w-full"
+              @change="handleRawSupplierChange"
+            >
+              <el-option
+                v-for="s in rawMaterialSuppliers"
+                :key="s.id"
+                :label="`${s.supplierName} (${s.supplierCode})`"
+                :value="s.id"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="理论产出数量 (基于BOM)">
             <el-input-number v-model="rawForm.theoreticalYield" :min="0" class="!w-full" controls-position="right" />
           </el-form-item>
@@ -75,6 +92,23 @@
               <el-input v-model="workForm.workerId" placeholder="如：W_001" />
             </el-form-item>
           </div>
+          <el-form-item label="外包商">
+            <el-select
+              v-model="workForm.supplierId"
+              placeholder="选择外包车间承包商（自有车间可不选）"
+              clearable
+              filterable
+              class="!w-full"
+              @change="handleWorkshopSupplierChange"
+            >
+              <el-option
+                v-for="s in outsourcedSuppliers"
+                :key="s.id"
+                :label="`${s.supplierName} (${s.supplierCode})`"
+                :value="s.id"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="生产产品名称">
             <el-input v-model="workForm.productName" placeholder="如：产品A" />
           </el-form-item>
@@ -155,11 +189,11 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { reactive, ref, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadProps } from 'element-plus'
 import * as XLSX from 'xlsx'
-import api from '../api'
+import api, { supplierApi } from '../api'
 
 type ImportType = 'raw' | 'workshop' | 'warehouse'
 type TemplateMeta = { name: string; headers: string[] }
@@ -190,9 +224,14 @@ const getToday = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-const rawForm = reactive({ materialId: '', productName: '', theoreticalYield: 0, recordDate: getToday() })
-const workForm = reactive({ workshopId: '', workerId: '', productName: '', declaredQuantity: 0, recordDate: getToday() })
+const rawForm = reactive({ materialId: '', productName: '', theoreticalYield: 0, recordDate: getToday(), supplierId: null as number | null })
+const workForm = reactive({ workshopId: '', workerId: '', productName: '', declaredQuantity: 0, recordDate: getToday(), supplierId: null as number | null })
 const warehouseForm = reactive({ batchNo: '', productName: '', inventoryQuantity: 0, shippedQuantity: 0, clientInfo: '', recordDate: getToday() })
+
+const rawMaterialSuppliers = ref<any[]>([])
+const outsourcedSuppliers = ref<any[]>([])
+const confirmSubmitRaw = ref(false)
+const confirmSubmitWork = ref(false)
 
 const btnLoading1 = ref(false)
 const btnLoading2 = ref(false)
@@ -393,13 +432,74 @@ const onWarehouseImportChange: UploadProps['onChange'] = (uploadFile) => {
   void importExcelFile(uploadFile.raw, 'warehouse')
 }
 
+const fetchSuppliers = async () => {
+  try {
+    const [rawRes, outRes] = await Promise.all([
+      supplierApi.listByType('RAW_MATERIAL'),
+      supplierApi.listByType('OUTSOURCED')
+    ])
+    rawMaterialSuppliers.value = (rawRes as any).data || []
+    outsourcedSuppliers.value = (outRes as any).data || []
+  } catch (e) {}
+}
+
+const checkBlacklistSupplier = (supplierId: number | null, supplierList: any[]) => {
+  if (!supplierId) return null
+  return supplierList.find(s => s.id === supplierId && s.status === 'BLACKLIST')
+}
+
+const handleRawSupplierChange = () => {
+  confirmSubmitRaw.value = false
+}
+
+const handleWorkshopSupplierChange = () => {
+  confirmSubmitWork.value = false
+}
+
+const showBlacklistWarning = async (supplier: any): Promise<boolean> => {
+  try {
+    await ElMessageBox({
+      title: '⚠️ 供应链风险警告',
+      message: `
+        <div class="space-y-3">
+          <p>您选择的供应商已被列入黑名单：</p>
+          <p class="font-medium">供应商名称：${supplier.supplierName}（${supplier.supplierCode}）</p>
+          <p>当前信用分：${supplier.creditScore}分</p>
+          <p class="text-sm text-gray-600">继续使用该供应商可能存在质量风险，建议更换供应商或加强验收检验。</p>
+        </div>
+      `,
+      dangerouslyUseHTMLString: true,
+      showCancelButton: true,
+      confirmButtonText: '确认继续使用',
+      cancelButtonText: '取消选择',
+      type: 'warning'
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
 const submitRaw = async () => {
   if (!rawForm.productName) return ElMessage.warning('请填写产品名称')
+  
+  const blacklistSupplier = checkBlacklistSupplier(rawForm.supplierId, rawMaterialSuppliers.value)
+  if (blacklistSupplier && !confirmSubmitRaw.value) {
+    const confirmed = await showBlacklistWarning(blacklistSupplier)
+    if (!confirmed) {
+      rawForm.supplierId = null
+      return
+    }
+    confirmSubmitRaw.value = true
+  }
+  
   btnLoading1.value = true
   try {
     await api.post('/records/raw-materials', rawForm)
     ElMessage.success('录入原材料数据成功')
     rawForm.theoreticalYield = 0
+    rawForm.supplierId = null
+    confirmSubmitRaw.value = false
   } finally {
     btnLoading1.value = false
   }
@@ -407,15 +507,32 @@ const submitRaw = async () => {
 
 const submitWork = async () => {
   if (!workForm.productName || !workForm.workerId) return ElMessage.warning('请填写产品及工人编号')
+  
+  const blacklistSupplier = checkBlacklistSupplier(workForm.supplierId, outsourcedSuppliers.value)
+  if (blacklistSupplier && !confirmSubmitWork.value) {
+    const confirmed = await showBlacklistWarning(blacklistSupplier)
+    if (!confirmed) {
+      workForm.supplierId = null
+      return
+    }
+    confirmSubmitWork.value = true
+  }
+  
   btnLoading2.value = true
   try {
     await api.post('/records/workshop', workForm)
     ElMessage.success('录入车间计件成功')
     workForm.declaredQuantity = 0
+    workForm.supplierId = null
+    confirmSubmitWork.value = false
   } finally {
     btnLoading2.value = false
   }
 }
+
+onMounted(() => {
+  fetchSuppliers()
+})
 
 const downloadTemplate = (command: ImportType) => {
   const target = TEMPLATE_META[command]

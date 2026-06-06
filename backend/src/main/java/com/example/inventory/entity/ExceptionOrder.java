@@ -34,4 +34,7 @@ public class ExceptionOrder {
     private String responsiblePerson;
     private LocalDate planCompletionDate;
     private String verificationResult;
+    private Long responsibleSupplierId;
+    private String responsibilityDescription;
+    private Integer deductScore;
 }
